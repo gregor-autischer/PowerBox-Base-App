@@ -10,9 +10,21 @@ from aiohttp import web, ClientSession
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
+# Development mode detection
+DEV_MODE = os.environ.get("DEV_MODE", "false").lower() == "true"
+
 # Home Assistant configuration
-SUPERVISOR_TOKEN = os.environ.get("SUPERVISOR_TOKEN")
-HA_API_URL = "http://supervisor/core/api"
+if DEV_MODE:
+    # Development mode: use direct HA API with long-lived access token
+    HA_TOKEN = os.environ.get("HA_TOKEN", "")
+    HA_URL = os.environ.get("HA_URL", "http://localhost:8123")
+    HA_API_URL = f"{HA_URL}/api"
+    logger.info(f"Running in DEVELOPMENT mode - connecting to {HA_URL}")
+else:
+    # Production mode: use Supervisor API
+    HA_TOKEN = os.environ.get("SUPERVISOR_TOKEN", "")
+    HA_API_URL = "http://supervisor/core/api"
+    logger.info("Running in PRODUCTION mode - using Supervisor API")
 
 # Entity state
 current_state = 0
@@ -23,7 +35,7 @@ async def update_ha_entity(session: ClientSession):
     global current_state
 
     headers = {
-        "Authorization": f"Bearer {SUPERVISOR_TOKEN}",
+        "Authorization": f"Bearer {HA_TOKEN}",
         "Content-Type": "application/json",
     }
 

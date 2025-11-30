@@ -1,0 +1,32 @@
+version: '3.8'
+
+services:
+  homeassistant:
+    container_name: homeassistant
+    image: ghcr.io/home-assistant/home-assistant:stable
+    volumes:
+      - ./ha_config:/config
+      - /etc/localtime:/etc/localtime:ro
+    restart: unless-stopped
+    privileged: true
+    network_mode: host
+    # Home Assistant will be available at http://localhost:8123
+
+  powerhaus:
+    container_name: powerhaus-addon
+    build:
+      context: .
+      dockerfile: Dockerfile.dev
+    volumes:
+      # Mount source for live development (restart container to apply changes)
+      - ./app.py:/app/app.py:ro
+    environment:
+      - HA_URL=http://localhost:8123
+      - HA_TOKEN=${HA_TOKEN:-}
+      - DEV_MODE=true
+      - INGRESS_PORT=8099
+    network_mode: host
+    restart: unless-stopped
+    depends_on:
+      - homeassistant
+    # Add-on UI will be available at http://localhost:8099

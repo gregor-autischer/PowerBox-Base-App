@@ -1,0 +1,19 @@
+FROM python:3.11-alpine
+
+# Install required packages
+RUN apk add --no-cache bash
+
+# Install Python dependencies
+RUN pip install --no-cache-dir aiohttp
+
+# Set working directory
+WORKDIR /app
+
+# Copy application files
+COPY app.py /app/
+
+# Expose port
+EXPOSE 8099
+
+# Run the application
+CMD ["python3", "/app/app.py"]
