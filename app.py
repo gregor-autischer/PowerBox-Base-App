@@ -3,8 +3,10 @@
 
 import asyncio
 import os
+import json
 import logging
-from aiohttp import web, ClientSession
+from pathlib import Path
+from aiohttp import web, ClientSession, WSMsgType
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -75,113 +77,108 @@ async def toggle_entity_task():
 
 
 async def handle_index(request):
-    """Handle the main page request."""
-    html_content = """<!DOCTYPE html>
-<html lang="en">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>PowerHaus Add-on</title>
-    <style>
-        * {
-            margin: 0;
-            padding: 0;
-            box-sizing: border-box;
-        }
-        body {
-            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, sans-serif;
-            background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%);
-            min-height: 100vh;
-            display: flex;
-            justify-content: center;
-            align-items: center;
-            color: #ffffff;
-        }
-        .container {
-            text-align: center;
-            padding: 40px;
-            background: rgba(255, 255, 255, 0.1);
-            border-radius: 20px;
-            backdrop-filter: blur(10px);
-            box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3);
-        }
-        .logo {
-            font-size: 4rem;
-            margin-bottom: 20px;
-        }
-        h1 {
-            font-size: 2.5rem;
-            margin-bottom: 10px;
-            background: linear-gradient(90deg, #00d4ff, #00ff88);
-            -webkit-background-clip: text;
-            -webkit-text-fill-color: transparent;
-            background-clip: text;
-        }
-        .subtitle {
-            font-size: 1.1rem;
-            color: #a0a0a0;
-            margin-bottom: 30px;
-        }
-        .status {
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            gap: 15px;
-            padding: 20px;
-            background: rgba(0, 212, 255, 0.1);
-            border-radius: 10px;
-            margin-top: 20px;
-        }
-        .status-indicator {
-            width: 15px;
-            height: 15px;
-            background: #00ff88;
-            border-radius: 50%;
-            animation: pulse 2s infinite;
-        }
-        @keyframes pulse {
-            0%, 100% { opacity: 1; }
-            50% { opacity: 0.5; }
-        }
-        .entity-info {
-            margin-top: 30px;
-            padding: 15px;
-            background: rgba(255, 255, 255, 0.05);
-            border-radius: 10px;
-            font-size: 0.9rem;
-            color: #888;
-        }
-        .entity-name {
-            color: #00d4ff;
-            font-family: monospace;
-            font-size: 1rem;
-        }
-    </style>
-</head>
-<body>
-    <div class="container">
-        <div class="logo">⚡</div>
-        <h1>PowerHaus</h1>
-        <p class="subtitle">Home Assistant Add-on</p>
+    """Handle the main page request - serve the Vue app."""
+    static_dir = Path(__file__).parent / "static"
+    index_file = static_dir / "index.html"
 
-        <div class="status">
-            <div class="status-indicator"></div>
-            <span>Add-on is running</span>
-        </div>
+    if index_file.exists():
+        return web.FileResponse(index_file)
 
-        <div class="entity-info">
-            <p>Publishing entity: <span class="entity-name">sensor.powerhaus</span></p>
-            <p style="margin-top: 10px;">State toggles between 0 and 1 every 5 seconds</p>
-        </div>
-    </div>
-</body>
-</html>"""
-    return web.Response(text=html_content, content_type='text/html')
+    # Fallback if static files not built yet
+    return web.Response(
+        text="<h1>Frontend not built</h1><p>Run 'npm install && npm run build' to build the frontend.</p>",
+        content_type='text/html'
+    )
 
 
 async def handle_health(request):
     """Health check endpoint."""
     return web.json_response({"status": "ok", "entity_state": current_state})
+
+
+async def handle_entities(request):
+    """Fetch all entities from Home Assistant."""
+    headers = {
+        "Authorization": f"Bearer {HA_TOKEN}",
+        "Content-Type": "application/json",
+    }
+
+    async with ClientSession() as session:
+        try:
+            async with session.get(f"{HA_API_URL}/states", headers=headers) as response:
+                if response.status == 200:
+                    entities = await response.json()
+                    return web.json_response(entities)
+                else:
+                    text = await response.text()
+                    return web.json_response(
+                        {"error": f"Failed to fetch entities: {response.status}", "detail": text},
+                        status=response.status
+                    )
+        except Exception as e:
+            logger.error(f"Error fetching entities: {e}")
+            return web.json_response({"error": str(e)}, status=500)
+
+
+async def handle_websocket(request):
+    """WebSocket proxy to Home Assistant for live updates."""
+    ws_client = web.WebSocketResponse()
+    await ws_client.prepare(request)
+
+    # Connect to Home Assistant WebSocket
+    ha_ws_url = HA_API_URL.replace("/api", "/api/websocket").replace("http", "ws")
+
+    async with ClientSession() as session:
+        try:
+            async with session.ws_connect(ha_ws_url) as ha_ws:
+                # HA sends auth_required first
+                msg = await ha_ws.receive_json()
+                logger.info(f"HA WebSocket: {msg}")
+
+                # Authenticate
+                await ha_ws.send_json({
+                    "type": "auth",
+                    "access_token": HA_TOKEN
+                })
+
+                # Wait for auth_ok
+                msg = await ha_ws.receive_json()
+                if msg.get("type") != "auth_ok":
+                    await ws_client.send_json({"error": "Authentication failed", "detail": msg})
+                    await ws_client.close()
+                    return ws_client
+
+                await ws_client.send_json({"type": "auth_ok"})
+
+                # Subscribe to state changes
+                await ha_ws.send_json({
+                    "id": 1,
+                    "type": "subscribe_events",
+                    "event_type": "state_changed"
+                })
+
+                # Relay messages between client and HA
+                async def relay_from_ha():
+                    async for msg in ha_ws:
+                        if msg.type == WSMsgType.TEXT:
+                            await ws_client.send_str(msg.data)
+                        elif msg.type == WSMsgType.ERROR:
+                            break
+
+                async def relay_from_client():
+                    async for msg in ws_client:
+                        if msg.type == WSMsgType.TEXT:
+                            await ha_ws.send_str(msg.data)
+                        elif msg.type == WSMsgType.ERROR:
+                            break
+
+                await asyncio.gather(relay_from_ha(), relay_from_client())
+
+        except Exception as e:
+            logger.error(f"WebSocket error: {e}")
+            await ws_client.send_json({"error": str(e)})
+
+    return ws_client
 
 
 async def start_background_tasks(app):
@@ -205,9 +202,16 @@ def main():
     # Routes
     app.router.add_get('/', handle_index)
     app.router.add_get('/health', handle_health)
+    app.router.add_get('/api/entities', handle_entities)
+    app.router.add_get('/api/ws', handle_websocket)
 
     # Handle ingress path
     app.router.add_get('/ingress', handle_index)
+
+    # Serve static files (JS, CSS, assets from Vite build)
+    static_dir = Path(__file__).parent / "static"
+    if static_dir.exists():
+        app.router.add_static('/assets', static_dir / "assets")
 
     # Background tasks
     app.on_startup.append(start_background_tasks)

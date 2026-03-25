@@ -25,3 +25,9 @@ venv/
 
 # Local HA development config
 ha_config/
+
+# Node.js
+node_modules/
+
+# Frontend build output
+static/

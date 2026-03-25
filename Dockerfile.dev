@@ -1,13 +1,24 @@
 FROM python:3.11-alpine
 
 # Install required packages
-RUN apk add --no-cache bash
+RUN apk add --no-cache bash nodejs npm
 
 # Install Python dependencies
 RUN pip install --no-cache-dir aiohttp
 
 # Set working directory
 WORKDIR /app
+
+# Copy package files and install frontend dependencies
+COPY package.json ./
+RUN npm install
+
+# Copy frontend source and config files
+COPY frontend/ ./frontend/
+COPY vite.config.js tailwind.config.js postcss.config.js ./
+
+# Build frontend assets
+RUN npm run build
 
 # Copy application files
 COPY app.py /app/
