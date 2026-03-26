@@ -1,6 +1,6 @@
 name: "PowerHaus"
-description: "PowerHaus Add-on - Publishes a powerhaus entity that toggles between 0 and 1 every 5 seconds"
-version: "1.0.0"
+description: "PowerHaus Add-on - Smart home management with SSH & web terminal"
+version: "1.1.0"
 slug: "powerhaus"
 init: false
 arch:
@@ -10,9 +10,46 @@ arch:
   - armv7
   - i386
 homeassistant_api: true
+hassio_api: true
+hassio_role: manager
+host_network: true
+host_dbus: true
+docker_api: true
+apparmor: false
 ingress: true
 ingress_port: 8099
 panel_icon: "mdi:flash"
 panel_title: "PowerHaus"
-options: {}
-schema: {}
+ports:
+  22/tcp: 22
+ports_description:
+  22/tcp: SSH server
+privileged:
+  - NET_ADMIN
+  - SYS_ADMIN
+  - SYS_RAWIO
+  - SYS_TIME
+  - SYS_NICE
+map:
+  - addons:rw
+  - all_addon_configs:rw
+  - backup:rw
+  - homeassistant_config:rw
+  - media:rw
+  - share:rw
+  - ssl:rw
+options:
+  ssh:
+    username: "hassio"
+    password: ""
+    authorized_keys: []
+    sftp: false
+    allow_tcp_forwarding: false
+schema:
+  ssh:
+    username: str
+    password: "password?"
+    authorized_keys:
+      - str
+    sftp: bool
+    allow_tcp_forwarding: bool

@@ -1,0 +1,9 @@
+#!/usr/bin/with-contenv bashio
+# ==============================================================================
+# PowerHaus SSH Daemon
+# Runs the OpenSSH server
+# ==============================================================================
+
+bashio::log.info "Starting SSH daemon..."
+
+exec /usr/sbin/sshd -D -e

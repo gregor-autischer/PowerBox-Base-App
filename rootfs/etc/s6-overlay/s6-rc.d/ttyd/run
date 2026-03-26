@@ -1,0 +1,18 @@
+#!/usr/bin/with-contenv bashio
+# ==============================================================================
+# PowerHaus Web Terminal (ttyd)
+# Runs ttyd on an internal port, proxied by the aiohttp app
+# ==============================================================================
+
+declare username
+
+username=$(bashio::config 'ssh.username')
+
+bashio::log.info "Starting web terminal (ttyd) on port 7681..."
+
+exec ttyd \
+    --port 7681 \
+    --interface 127.0.0.1 \
+    --writable \
+    --base-path /api/terminal \
+    login -f "${username}"

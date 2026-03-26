@@ -1,7 +1,7 @@
 FROM python:3.11-alpine
 
 # Install required packages
-RUN apk add --no-cache bash nodejs npm
+RUN apk add --no-cache bash nodejs npm openssh ttyd tmux
 
 # Install Python dependencies
 RUN pip install --no-cache-dir aiohttp

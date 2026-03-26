@@ -1,10 +1,9 @@
 #!/usr/bin/with-contenv bashio
 # ==============================================================================
-# PowerHaus Add-on
-# Runs the main PowerHaus application
+# PowerHaus App Service
+# Runs the main PowerHaus aiohttp application
 # ==============================================================================
 
-bashio::log.info "Starting PowerHaus Add-on..."
+bashio::log.info "Starting PowerHaus application..."
 
-# Run the Python application
-exec python3 /app.py
+exec python3 /app/app.py

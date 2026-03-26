@@ -181,6 +181,80 @@ async def handle_websocket(request):
     return ws_client
 
 
+async def handle_terminal_proxy(request):
+    """Proxy HTTP requests to ttyd running on port 7681."""
+    path = request.match_info.get('path', '')
+    ttyd_url = f"http://127.0.0.1:7681/api/terminal/{path}"
+    query_string = request.query_string
+    if query_string:
+        ttyd_url += f"?{query_string}"
+
+    async with ClientSession() as session:
+        try:
+            async with session.request(
+                method=request.method,
+                url=ttyd_url,
+                headers={k: v for k, v in request.headers.items()
+                         if k.lower() not in ('host', 'content-length')},
+                data=await request.read(),
+            ) as resp:
+                body = await resp.read()
+                return web.Response(
+                    body=body,
+                    status=resp.status,
+                    headers={k: v for k, v in resp.headers.items()
+                             if k.lower() not in ('transfer-encoding', 'content-encoding')},
+                )
+        except Exception as e:
+            logger.error(f"Terminal proxy error: {e}")
+            return web.json_response(
+                {"error": "Terminal not available", "detail": str(e)},
+                status=502,
+            )
+
+
+async def handle_terminal_ws(request):
+    """Proxy WebSocket connections to ttyd."""
+    ws_client = web.WebSocketResponse(protocols=['tty'])
+    await ws_client.prepare(request)
+
+    path = request.match_info.get('path', '')
+    ttyd_ws_url = f"http://127.0.0.1:7681/api/terminal/{path}"
+    query_string = request.query_string
+    if query_string:
+        ttyd_ws_url += f"?{query_string}"
+
+    async with ClientSession() as session:
+        try:
+            async with session.ws_connect(
+                ttyd_ws_url,
+                protocols=['tty'],
+            ) as ttyd_ws:
+                async def relay_from_ttyd():
+                    async for msg in ttyd_ws:
+                        if msg.type == WSMsgType.TEXT:
+                            await ws_client.send_str(msg.data)
+                        elif msg.type == WSMsgType.BINARY:
+                            await ws_client.send_bytes(msg.data)
+                        elif msg.type in (WSMsgType.CLOSE, WSMsgType.ERROR):
+                            break
+
+                async def relay_from_client():
+                    async for msg in ws_client:
+                        if msg.type == WSMsgType.TEXT:
+                            await ttyd_ws.send_str(msg.data)
+                        elif msg.type == WSMsgType.BINARY:
+                            await ttyd_ws.send_bytes(msg.data)
+                        elif msg.type in (WSMsgType.CLOSE, WSMsgType.ERROR):
+                            break
+
+                await asyncio.gather(relay_from_ttyd(), relay_from_client())
+        except Exception as e:
+            logger.error(f"Terminal WebSocket proxy error: {e}")
+
+    return ws_client
+
+
 async def start_background_tasks(app):
     """Start background tasks."""
     app['entity_toggle_task'] = asyncio.create_task(toggle_entity_task())
@@ -204,6 +278,10 @@ def main():
     app.router.add_get('/health', handle_health)
     app.router.add_get('/api/entities', handle_entities)
     app.router.add_get('/api/ws', handle_websocket)
+
+    # Terminal proxy routes (ttyd on port 7681)
+    app.router.add_route('*', '/api/terminal/ws', handle_terminal_ws)
+    app.router.add_route('*', '/api/terminal/{path:.*}', handle_terminal_proxy)
 
     # Handle ingress path
     app.router.add_get('/ingress', handle_index)

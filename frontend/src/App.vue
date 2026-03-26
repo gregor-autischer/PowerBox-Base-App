@@ -10,7 +10,13 @@ const toggleValue = ref(true)
 const checkboxValue = ref(true)
 const selectValue = ref('option1')
 const progress = ref(65)
+const terminalKey = ref(0)
+const terminalUrl = computed(() => `/api/terminal/`)
 let ws = null
+
+function refreshTerminal() {
+  terminalKey.value++
+}
 
 const filteredEntities = computed(() => {
   const query = searchQuery.value.toLowerCase()
@@ -100,6 +106,7 @@ onUnmounted(() => {
           <ul tabindex="0" class="menu menu-sm dropdown-content mt-3 z-[1] p-2 shadow bg-base-100 rounded-box w-52">
             <li><a @click="activeTab = 'dashboard'" :class="{ 'active': activeTab === 'dashboard' }">Dashboard</a></li>
             <li><a @click="activeTab = 'entities'" :class="{ 'active': activeTab === 'entities' }">Entities</a></li>
+            <li><a @click="activeTab = 'terminal'" :class="{ 'active': activeTab === 'terminal' }">Terminal</a></li>
             <li><a @click="activeTab = 'components'" :class="{ 'active': activeTab === 'components' }">Components</a></li>
           </ul>
         </div>
@@ -111,6 +118,7 @@ onUnmounted(() => {
         <ul class="menu menu-horizontal px-1">
           <li><a @click="activeTab = 'dashboard'" :class="{ 'bg-primary text-primary-content': activeTab === 'dashboard' }">Dashboard</a></li>
           <li><a @click="activeTab = 'entities'" :class="{ 'bg-primary text-primary-content': activeTab === 'entities' }">Entities</a></li>
+          <li><a @click="activeTab = 'terminal'" :class="{ 'bg-primary text-primary-content': activeTab === 'terminal' }">Terminal</a></li>
           <li><a @click="activeTab = 'components'" :class="{ 'bg-primary text-primary-content': activeTab === 'components' }">Components</a></li>
         </ul>
       </div>
@@ -399,6 +407,43 @@ onUnmounted(() => {
               </table>
             </div>
           </div>
+        </div>
+      </div>
+
+      <!-- Terminal Tab -->
+      <div v-if="activeTab === 'terminal'" class="space-y-4">
+        <div class="card bg-base-100 shadow-lg border border-base-300">
+          <div class="card-body p-0">
+            <div class="flex items-center justify-between px-4 py-2 bg-base-300 rounded-t-2xl">
+              <h2 class="font-mono text-sm font-medium flex items-center gap-2">
+                <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 9l3 3-3 3m5 0h3M5 20h14a2 2 0 002-2V6a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" />
+                </svg>
+                Terminal
+              </h2>
+              <div class="flex gap-1">
+                <button @click="refreshTerminal" class="btn btn-ghost btn-xs" title="Reconnect">
+                  <svg xmlns="http://www.w3.org/2000/svg" class="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+                  </svg>
+                </button>
+              </div>
+            </div>
+            <div class="relative" style="height: 70vh;">
+              <iframe
+                ref="terminalFrame"
+                :src="terminalUrl"
+                class="w-full h-full border-0 rounded-b-2xl bg-black"
+                :key="terminalKey"
+              ></iframe>
+            </div>
+          </div>
+        </div>
+        <div class="alert alert-info shadow-lg">
+          <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" class="stroke-current shrink-0 w-6 h-6">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path>
+          </svg>
+          <span>This terminal runs inside the add-on container. Use <code class="kbd kbd-sm">ha</code> CLI for Home Assistant commands. SSH is also available remotely via your Cloudflare tunnel.</span>
         </div>
       </div>
 
