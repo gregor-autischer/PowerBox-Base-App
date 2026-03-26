@@ -1,18 +1,38 @@
 #!/usr/bin/with-contenv bashio
 # ==============================================================================
 # PowerHaus Web Terminal (ttyd)
-# Runs ttyd on an internal port, proxied by the aiohttp app
+# Runs ttyd on an internal port, secured with internal credential
+# Only the aiohttp proxy (app.py) knows the credential
 # ==============================================================================
 
 declare username
+declare ttyd_pass
 
 username=$(bashio::config 'ssh.username')
 
+# Read internal credential
+if bashio::fs.file_exists "/data/ttyd_credential"; then
+    ttyd_pass=$(cat /data/ttyd_credential)
+else
+    bashio::log.warning "No ttyd credential found, running without auth!"
+    ttyd_pass=""
+fi
+
 bashio::log.info "Starting web terminal (ttyd) on port 7681..."
 
-exec ttyd \
-    --port 7681 \
-    --interface 127.0.0.1 \
-    --writable \
-    --base-path /api/terminal \
-    login -f "${username}"
+if [ -n "${ttyd_pass}" ]; then
+    exec ttyd \
+        --port 7681 \
+        --interface 127.0.0.1 \
+        --writable \
+        --base-path /api/terminal \
+        --credential "powerhaus:${ttyd_pass}" \
+        login -f "${username}"
+else
+    exec ttyd \
+        --port 7681 \
+        --interface 127.0.0.1 \
+        --writable \
+        --base-path /api/terminal \
+        login -f "${username}"
+fi

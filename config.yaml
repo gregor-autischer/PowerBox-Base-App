@@ -41,14 +41,12 @@ map:
 options:
   ssh:
     username: "hassio"
-    password: ""
     authorized_keys: []
     sftp: false
     allow_tcp_forwarding: false
 schema:
   ssh:
     username: str
-    password: "password?"
     authorized_keys:
       - str
     sftp: bool

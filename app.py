@@ -37,6 +37,21 @@ BOX_API_TOKEN = os.environ.get("BOX_API_TOKEN", "")
 # Backup stream chunk size (256 KB)
 BACKUP_CHUNK_SIZE = 262144
 
+# SSH username (from HA addon options, default hassio)
+SSH_USERNAME = "hassio"
+
+# Config sync state
+synced_config = {
+    "ssh_authorized_keys": [],
+}
+
+# Terminal token cache (token → expiry timestamp)
+terminal_token_cache = {}
+TERMINAL_TOKEN_CACHE_TTL = 60  # seconds to cache valid tokens locally
+
+# Internal ttyd credential (read from /data/ttyd_credential at startup)
+TTYD_CREDENTIAL = ""
+
 # Entity state
 current_state = 0
 
@@ -190,21 +205,38 @@ async def handle_websocket(request):
     return ws_client
 
 
+async def _check_terminal_auth(request) -> web.Response | None:
+    """Check terminal access token. Returns error response or None if valid."""
+    token = request.query.get("token", "")
+    if not token:
+        return web.json_response({"error": "Terminal token required"}, status=401)
+    if not await validate_terminal_token(token):
+        return web.json_response({"error": "Invalid or expired terminal token"}, status=401)
+    return None
+
+
 async def handle_terminal_proxy(request):
     """Proxy HTTP requests to ttyd running on port 7681."""
+    auth_error = await _check_terminal_auth(request)
+    if auth_error:
+        return auth_error
+
     path = request.match_info.get('path', '')
     ttyd_url = f"http://127.0.0.1:7681/api/terminal/{path}"
     query_string = request.query_string
     if query_string:
         ttyd_url += f"?{query_string}"
 
-    async with ClientSession() as session:
+    # Build auth for internal ttyd credential
+    ttyd_auth = aiohttp.BasicAuth("powerhaus", TTYD_CREDENTIAL) if TTYD_CREDENTIAL else None
+
+    async with ClientSession(auth=ttyd_auth) as session:
         try:
             async with session.request(
                 method=request.method,
                 url=ttyd_url,
                 headers={k: v for k, v in request.headers.items()
-                         if k.lower() not in ('host', 'content-length')},
+                         if k.lower() not in ('host', 'content-length', 'authorization')},
                 data=await request.read(),
             ) as resp:
                 body = await resp.read()
@@ -224,6 +256,10 @@ async def handle_terminal_proxy(request):
 
 async def handle_terminal_ws(request):
     """Proxy WebSocket connections to ttyd."""
+    auth_error = await _check_terminal_auth(request)
+    if auth_error:
+        return auth_error
+
     ws_client = web.WebSocketResponse(protocols=['tty'])
     await ws_client.prepare(request)
 
@@ -233,7 +269,9 @@ async def handle_terminal_ws(request):
     if query_string:
         ttyd_ws_url += f"?{query_string}"
 
-    async with ClientSession() as session:
+    ttyd_auth = aiohttp.BasicAuth("powerhaus", TTYD_CREDENTIAL) if TTYD_CREDENTIAL else None
+
+    async with ClientSession(auth=ttyd_auth) as session:
         try:
             async with session.ws_connect(
                 ttyd_ws_url,
@@ -461,18 +499,115 @@ async def handle_backup_delete(request):
             return web.json_response({"error": str(e)}, status=502)
 
 
+async def config_sync_task():
+    """Background task: periodically sync config from Studio, update authorized_keys."""
+    await asyncio.sleep(30)  # wait for services to stabilize
+
+    while True:
+        if STUDIO_API_BASE and BOX_API_TOKEN:
+            try:
+                async with ClientSession() as session:
+                    async with session.post(
+                        f"{STUDIO_API_BASE}/studio/api/addon/config/sync/",
+                        headers=_studio_headers(),
+                        json={},
+                        timeout=ClientTimeout(total=15),
+                    ) as resp:
+                        if resp.status == 200:
+                            data = await resp.json()
+                            config = data.get("config", data)
+
+                            # Update SSH authorized keys
+                            new_keys = config.get("ssh_authorized_keys", [])
+                            if new_keys != synced_config["ssh_authorized_keys"]:
+                                synced_config["ssh_authorized_keys"] = new_keys
+                                await _write_authorized_keys(new_keys)
+                                logger.info(f"Updated authorized_keys with {len(new_keys)} key(s)")
+            except Exception as e:
+                logger.debug(f"Config sync error (will retry): {e}")
+
+        await asyncio.sleep(60)
+
+
+async def _write_authorized_keys(keys: list[str]):
+    """Write SSH authorized keys to the user's authorized_keys file."""
+    username = SSH_USERNAME
+    ssh_dir = f"/home/{username}/.ssh"
+    auth_keys_path = f"{ssh_dir}/authorized_keys"
+
+    try:
+        os.makedirs(ssh_dir, exist_ok=True)
+        with open(auth_keys_path, "w") as f:
+            for key in keys:
+                key = key.strip()
+                if key:
+                    f.write(f"{key}\n")
+        os.chmod(auth_keys_path, 0o600)
+    except Exception as e:
+        logger.error(f"Failed to write authorized_keys: {e}")
+
+
+async def validate_terminal_token(token: str) -> bool:
+    """Validate a terminal token against Studio (with local caching)."""
+    if not token:
+        return False
+
+    import time
+    now = time.time()
+
+    # Check local cache first
+    cached = terminal_token_cache.get(token)
+    if cached and cached > now:
+        return True
+
+    # Ask Studio to validate
+    if not STUDIO_API_BASE or not BOX_API_TOKEN:
+        return False
+
+    try:
+        async with ClientSession() as session:
+            async with session.post(
+                f"{STUDIO_API_BASE}/studio/api/addon/terminal/validate/",
+                headers=_studio_headers(),
+                json={"token": token},
+                timeout=ClientTimeout(total=5),
+            ) as resp:
+                if resp.status == 200:
+                    data = await resp.json()
+                    if data.get("valid"):
+                        # Cache the valid token locally
+                        terminal_token_cache[token] = now + TERMINAL_TOKEN_CACHE_TTL
+                        return True
+    except Exception as e:
+        logger.debug(f"Terminal token validation error: {e}")
+
+    return False
+
+
 async def start_background_tasks(app):
     """Start background tasks."""
     app['entity_toggle_task'] = asyncio.create_task(toggle_entity_task())
+    app['config_sync_task'] = asyncio.create_task(config_sync_task())
+
+    # Load ttyd internal credential
+    global TTYD_CREDENTIAL
+    try:
+        with open("/data/ttyd_credential", "r") as f:
+            TTYD_CREDENTIAL = f.read().strip()
+    except FileNotFoundError:
+        logger.warning("No ttyd credential found at /data/ttyd_credential")
 
 
 async def cleanup_background_tasks(app):
     """Cleanup background tasks."""
-    app['entity_toggle_task'].cancel()
-    try:
-        await app['entity_toggle_task']
-    except asyncio.CancelledError:
-        pass
+    for task_name in ('entity_toggle_task', 'config_sync_task'):
+        task = app.get(task_name)
+        if task:
+            task.cancel()
+            try:
+                await task
+            except asyncio.CancelledError:
+                pass
 
 
 def main():

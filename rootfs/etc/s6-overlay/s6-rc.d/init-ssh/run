@@ -2,12 +2,10 @@
 # ==============================================================================
 # PowerHaus SSH Initialization
 # Adapted from hassio-addons/addon-ssh
-# Generates host keys, configures sshd, sets up user
+# Generates host keys, configures sshd, sets up user, generates ttyd credential
 # ==============================================================================
 
 declare username
-declare password
-declare authorized_keys
 
 bashio::log.info "Initializing SSH..."
 
@@ -26,7 +24,6 @@ fi
 
 # --- Read configuration ---
 username=$(bashio::config 'ssh.username')
-password=$(bashio::config 'ssh.password')
 
 # --- Create/update user ---
 if id -u "${username}" > /dev/null 2>&1; then
@@ -38,26 +35,22 @@ fi
 # Create user with home directory
 adduser -D -s /bin/bash "${username}" 2>/dev/null || true
 
-# Set password if provided
-if bashio::var.has_value "${password}"; then
-    echo "${username}:${password}" | chpasswd 2>/dev/null
-    # Enable password authentication
-    sed -i "s/PasswordAuthentication.*/PasswordAuthentication yes/" /etc/ssh/sshd_config
-else
-    # Disable password authentication
-    sed -i "s/PasswordAuthentication.*/PasswordAuthentication no/" /etc/ssh/sshd_config
-fi
+# --- Always disable password auth (Studio manages keys) ---
+sed -i "s/PasswordAuthentication.*/PasswordAuthentication no/" /etc/ssh/sshd_config
+bashio::log.info "Password authentication disabled (Studio-managed SSH keys only)."
 
-# --- Setup authorized keys ---
+# --- Setup authorized keys directory ---
+# Keys will be populated dynamically by the config sync task in app.py
 mkdir -p "/home/${username}/.ssh"
+touch "/home/${username}/.ssh/authorized_keys"
+chmod 600 "/home/${username}/.ssh/authorized_keys"
 
+# Also add any locally-configured keys from add-on options
 if bashio::config.has_value 'ssh.authorized_keys'; then
-    bashio::log.info "Setting up authorized keys..."
-    rm -f "/home/${username}/.ssh/authorized_keys"
+    bashio::log.info "Adding locally-configured authorized keys..."
     while IFS= read -r key; do
         echo "${key}" >> "/home/${username}/.ssh/authorized_keys"
     done <<< "$(bashio::config 'ssh.authorized_keys')"
-    chmod 600 "/home/${username}/.ssh/authorized_keys"
 fi
 
 chown -R "${username}:${username}" "/home/${username}/.ssh"
@@ -80,6 +73,14 @@ fi
 # Configure SFTP
 if bashio::config.true 'ssh.sftp'; then
     sed -i "s|#Subsystem sftp|Subsystem sftp|" /etc/ssh/sshd_config
+fi
+
+# --- Generate ttyd internal credential ---
+if ! bashio::fs.file_exists "/data/ttyd_credential"; then
+    TTYD_PASS=$(head -c 32 /dev/urandom | base64 | tr -dc 'a-zA-Z0-9' | head -c 32)
+    echo "${TTYD_PASS}" > /data/ttyd_credential
+    chmod 600 /data/ttyd_credential
+    bashio::log.info "Generated internal ttyd credential."
 fi
 
 # --- Setup user environment ---
