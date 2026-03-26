@@ -5,8 +5,8 @@ import asyncio
 import os
 import json
 import logging
+import time
 from pathlib import Path
-import hashlib
 import aiohttp
 from aiohttp import web, ClientSession, WSMsgType, MultipartReader, ClientTimeout
 
@@ -264,7 +264,7 @@ async def handle_terminal_ws(request):
     await ws_client.prepare(request)
 
     path = request.match_info.get('path', '')
-    ttyd_ws_url = f"http://127.0.0.1:7681/api/terminal/{path}"
+    ttyd_ws_url = f"ws://127.0.0.1:7681/api/terminal/{path}"
     query_string = request.query_string
     if query_string:
         ttyd_ws_url += f"?{query_string}"
@@ -401,35 +401,34 @@ async def handle_backup_download(request):
 
     async with ClientSession() as session:
         try:
-            resp = await session.get(
+            async with session.get(
                 f"{STUDIO_API_BASE}/studio/api/addon/backup/download/{backup_id}/",
                 headers=_studio_headers(),
-            )
+            ) as resp:
+                if resp.status == 404:
+                    return web.json_response({"error": "Backup not found"}, status=404)
+                if resp.status != 200:
+                    body = await resp.text()
+                    return web.json_response(
+                        {"error": f"Studio returned {resp.status}", "detail": body},
+                        status=resp.status,
+                    )
 
-            if resp.status == 404:
-                return web.json_response({"error": "Backup not found"}, status=404)
-            if resp.status != 200:
-                body = await resp.text()
-                return web.json_response(
-                    {"error": f"Studio returned {resp.status}", "detail": body},
-                    status=resp.status,
+                # Stream response back to caller
+                response = web.StreamResponse(
+                    status=200,
+                    headers={
+                        "Content-Type": "application/octet-stream",
+                        "Content-Disposition": f'attachment; filename="{backup_id}.tar"',
+                    },
                 )
+                await response.prepare(request)
 
-            # Stream response back to caller
-            response = web.StreamResponse(
-                status=200,
-                headers={
-                    "Content-Type": "application/octet-stream",
-                    "Content-Disposition": f'attachment; filename="{backup_id}.tar"',
-                },
-            )
-            await response.prepare(request)
+                async for chunk in resp.content.iter_chunked(BACKUP_CHUNK_SIZE):
+                    await response.write(chunk)
 
-            async for chunk in resp.content.iter_chunked(BACKUP_CHUNK_SIZE):
-                await response.write(chunk)
-
-            await response.write_eof()
-            return response
+                await response.write_eof()
+                return response
 
         except Exception as e:
             logger.error(f"Backup download from Studio failed: {e}")
@@ -552,7 +551,6 @@ async def validate_terminal_token(token: str) -> bool:
     if not token:
         return False
 
-    import time
     now = time.time()
 
     # Check local cache first
