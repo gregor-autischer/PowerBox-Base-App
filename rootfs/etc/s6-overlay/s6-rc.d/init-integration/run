@@ -1,0 +1,35 @@
+#!/usr/bin/with-contenv bashio
+# ==============================================================================
+# PowerHaus Integration Installer
+# Copies the companion custom integration to HA config directory
+# ==============================================================================
+
+declare SOURCE="/app/integration/custom_components/powerhaus"
+declare TARGET="/config/custom_components/powerhaus"
+
+if [ ! -d "${SOURCE}" ]; then
+    bashio::log.warning "Integration source not found at ${SOURCE}, skipping."
+    exit 0
+fi
+
+# Create custom_components directory if needed
+mkdir -p /config/custom_components
+
+# Check if update is needed by comparing manifest versions
+if [ -f "${TARGET}/manifest.json" ] && [ -f "${SOURCE}/manifest.json" ]; then
+    CURRENT_VERSION=$(bashio::jq "${TARGET}/manifest.json" '.version')
+    SOURCE_VERSION=$(bashio::jq "${SOURCE}/manifest.json" '.version')
+
+    if [ "${CURRENT_VERSION}" = "${SOURCE_VERSION}" ]; then
+        bashio::log.info "PowerHaus integration v${CURRENT_VERSION} already installed."
+        exit 0
+    fi
+
+    bashio::log.info "Updating PowerHaus integration: v${CURRENT_VERSION} -> v${SOURCE_VERSION}"
+fi
+
+# Copy integration files
+cp -r "${SOURCE}" "${TARGET}"
+
+bashio::log.info "PowerHaus integration installed to ${TARGET}"
+bashio::log.info "A Home Assistant restart may be required to load the integration."

@@ -29,6 +29,9 @@ RUN npm run build
 # Copy application files
 COPY app.py /app/
 
+# Copy companion integration (auto-installed to /config on startup)
+COPY integration/ /app/integration/
+
 # Copy rootfs (s6-overlay services, sshd_config)
 COPY rootfs /
 
@@ -37,6 +40,7 @@ RUN chmod a+x \
     /etc/s6-overlay/s6-rc.d/powerhaus-app/run \
     /etc/s6-overlay/s6-rc.d/powerhaus-app/finish \
     /etc/s6-overlay/s6-rc.d/init-ssh/run \
+    /etc/s6-overlay/s6-rc.d/init-integration/run \
     /etc/s6-overlay/s6-rc.d/sshd/run \
     /etc/s6-overlay/s6-rc.d/sshd/finish \
     /etc/s6-overlay/s6-rc.d/ttyd/run
