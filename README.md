@@ -11,7 +11,7 @@ Smart home management with cloud backups, SSH access, and a web terminal for Hom
 3. Click the menu icon (three dots, top right) and select **Repositories**.
 4. Add this repository URL:
    ```
-   https://github.com/gregor-autischer/PH_HA_Main_AddOn
+   https://github.com/gregor-autischer/PowerBox-Base-App
    ```
 5. Find **PowerHaus** in the add-on store and click **Install**.
 

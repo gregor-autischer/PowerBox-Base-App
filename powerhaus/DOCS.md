@@ -43,4 +43,4 @@ SSH access requires a public key registered either locally (via the `authorized_
 
 ## Support
 
-For issues and feature requests, visit the [PowerHaus GitHub repository](https://github.com/gregor-autischer/PH_HA_Main_AddOn/issues).
+For issues and feature requests, visit the [PowerHaus GitHub repository](https://github.com/gregor-autischer/PowerBox-Base-App/issues).
