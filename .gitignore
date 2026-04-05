@@ -1,3 +1,4 @@
+# Python
 __pycache__/
 *.py[cod]
 *$py.class
@@ -18,16 +19,21 @@ wheels/
 *.egg-info/
 .installed.cfg
 *.egg
-.env
 .venv
 env/
 venv/
 
+# Environment / secrets
+.env
+
 # Local HA development config
-ha_config/
+dev/ha_config/
 
 # Node.js
 node_modules/
 
-# Frontend build output
-static/
+# Frontend build output (built in Docker)
+powerhaus/static/
+
+# OS files
+.DS_Store

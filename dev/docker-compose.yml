@@ -14,11 +14,11 @@ services:
   powerhaus:
     container_name: powerhaus-addon
     build:
-      context: .
-      dockerfile: Dockerfile.dev
+      context: ../powerhaus
+      dockerfile: ../dev/Dockerfile.dev
     volumes:
       # Mount source for live development (restart container to apply changes)
-      - ./app.py:/app/app.py:ro
+      - ../powerhaus/app.py:/app/app.py:ro
     environment:
       - HA_URL=http://homeassistant:8123
       - HA_TOKEN=${HA_TOKEN:-}
